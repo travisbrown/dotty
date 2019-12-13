@@ -1529,7 +1529,6 @@ object Parsers {
         typeBounds().withSpan(Span(start, in.lastOffset, start))
       }
       else if (isIdent(nme.*) && ctx.settings.YkindProjector.value) {
-        syntaxError("`*` placeholders are not implemented yet")
         typeIdent()
       }
       else if (isSplice)
@@ -1550,7 +1549,29 @@ object Parsers {
     private def simpleTypeRest(t: Tree): Tree = in.token match {
       case HASH => simpleTypeRest(typeProjection(t))
       case LBRACKET => simpleTypeRest(atSpan(startOffset(t)) {
-        AppliedTypeTree(rejectWildcardType(t), typeArgs(namedOK = false, wildOK = true)) })
+        val applied = rejectWildcardType(t)
+        val args = typeArgs(namedOK = false, wildOK = true)
+
+        if (ctx.settings.YkindProjector.value) {
+          val tparams = new ListBuffer[TypeDef]
+
+          val newArgs = args.map {
+            case Ident(tpnme.raw.STAR) =>
+              val name = tpnme.syntheticTypeParamName(tparams.length)
+              tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
+              Ident(name)
+            case other => other
+          }
+
+          if (tparams.isEmpty) {
+            AppliedTypeTree(applied, args)
+          } else {
+            LambdaTypeTree(tparams.toList, AppliedTypeTree(applied, newArgs))
+          }
+        } else {
+          AppliedTypeTree(applied, args)
+        }
+      })
       case _ => t
     }
 
