@@ -1322,8 +1322,39 @@ object Parsers {
       def functionRest(params: List[Tree]): Tree =
         atSpan(start, accept(ARROW)) {
           val t = typ()
-          if (imods.isOneOf(Given | Erased)) new FunctionWithMods(params, t, imods)
-          else Function(params, t)
+
+          if (ctx.settings.YkindProjector.value) {
+            val tparams = new ListBuffer[TypeDef]
+
+            val newParams = params.map {
+              case Ident(tpnme.raw.STAR) =>
+                val name = tpnme.syntheticTypeParamName(tparams.length)
+                tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
+                Ident(name)
+              case other => other
+            }
+
+            val newT = t match {
+              case Ident(tpnme.raw.STAR) =>
+                val name = tpnme.syntheticTypeParamName(tparams.length)
+                tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
+                Ident(name)
+              case other => other
+            }
+
+            if (tparams.isEmpty) {
+              if (imods.isOneOf(Given | Erased)) new FunctionWithMods(params, t, imods)
+              else Function(params, t)
+            } else {
+              val func = if (imods.isOneOf(Given | Erased)) new FunctionWithMods(newParams, newT, imods)
+              else Function(newParams, newT)
+              LambdaTypeTree(tparams.toList, func)
+            }
+
+          } else {
+            if (imods.isOneOf(Given | Erased)) new FunctionWithMods(params, t, imods)
+            else Function(params, t)
+          }
         }
       def funArgTypesRest(first: Tree, following: () => Tree) = {
         val buf = new ListBuffer[Tree] += first
@@ -1592,7 +1623,30 @@ object Parsers {
           AppliedTypeTree(applied, args)
         }
       })
-      case _ => t
+      case _ =>
+        if (ctx.settings.YkindProjector.value) {
+          t match {
+            case Tuple(params) =>
+              val tparams = new ListBuffer[TypeDef]
+
+              val newParams = params.map {
+                case Ident(tpnme.raw.STAR) =>
+                  val name = tpnme.syntheticTypeParamName(tparams.length)
+                  tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
+                  Ident(name)
+                case other => other
+              }
+
+              if (tparams.isEmpty) {
+                t
+              } else {
+                LambdaTypeTree(tparams.toList, Tuple(newParams))
+              }
+            case _ => t
+          }
+        } else {
+          t
+        }
     }
 
     private def typeProjection(t: Tree): Tree = {
