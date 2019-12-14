@@ -616,6 +616,7 @@ object StdNames {
       final val SLASH: N  = "/"
       final val STAR : N  = "*"
       final val TILDE: N  = "~"
+      final val LAMBDA: N  = "λ"
 
       final val isUnary: Set[Name] = Set(MINUS, PLUS, TILDE, BANG)
     }
