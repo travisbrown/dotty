@@ -16,7 +16,8 @@ object TestConfiguration {
     "-Yno-deep-subtypes",
     "-Yno-double-bindings",
     "-Yforce-sbt-phases",
-    "-Xverify-signatures"
+    "-Xverify-signatures",
+    "-Ykind-projector"
   )
 
   val basicClasspath = mkClasspath(List(
