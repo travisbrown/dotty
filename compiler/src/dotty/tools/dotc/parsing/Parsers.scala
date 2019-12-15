@@ -1323,37 +1323,17 @@ object Parsers {
         atSpan(start, accept(ARROW)) {
           val t = typ()
 
-          if (ctx.settings.YkindProjector.value) {
-            val tparams = new ListBuffer[TypeDef]
-
-            val newParams = params.map {
-              case Ident(tpnme.raw.STAR) =>
-                val name = tpnme.syntheticTypeParamName(tparams.length)
-                tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
-                Ident(name)
-              case other => other
-            }
-
-            val newT = t match {
-              case Ident(tpnme.raw.STAR) =>
-                val name = tpnme.syntheticTypeParamName(tparams.length)
-                tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
-                Ident(name)
-              case other => other
-            }
+          if (imods.isOneOf(Given | Erased)) new FunctionWithMods(params, t, imods)
+          else if (ctx.settings.YkindProjector.value) {
+            val (newParams :+ newT, tparams) = replaceKindProjectorPlaceholders(params :+ t)
 
             if (tparams.isEmpty) {
-              if (imods.isOneOf(Given | Erased)) new FunctionWithMods(params, t, imods)
-              else Function(params, t)
+              Function(params, t)
             } else {
-              val func = if (imods.isOneOf(Given | Erased)) new FunctionWithMods(newParams, newT, imods)
-              else Function(newParams, newT)
-              LambdaTypeTree(tparams.toList, func)
+              LambdaTypeTree(tparams, Function(newParams, newT))
             }
-
           } else {
-            if (imods.isOneOf(Given | Erased)) new FunctionWithMods(params, t, imods)
-            else Function(params, t)
+            Function(params, t)
           }
         }
       def funArgTypesRest(first: Tree, following: () => Tree) = {
@@ -1442,6 +1422,23 @@ object Parsers {
             syntaxError("Types with erased keyword can only be function types `erased (...) => ...`", implicitKwPos(start))
           t
       }
+    }
+
+    /** Replaces kind-projector's `*` in a list of types arguments with synthetic names,
+     *  returning the new argument list and the synthetic type definitions.
+     */
+    private def replaceKindProjectorPlaceholders(params: List[Tree]): (List[Tree], List[TypeDef]) = {
+      val tparams = new ListBuffer[TypeDef]
+
+      val newParams = params.map {
+        case Ident(tpnme.raw.STAR) =>
+          val name = tpnme.syntheticTypeParamName(tparams.length)
+          tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
+          Ident(name)
+        case other => other
+      }
+
+      (newParams, tparams.toList)
     }
 
     private def implicitKwPos(start: Int): Span =
@@ -1584,6 +1581,14 @@ object Parsers {
         val args = typeArgs(namedOK = false, wildOK = true)
 
         if (ctx.settings.YkindProjector.value) {
+          def fail(): Tree = {
+            syntaxError(
+              "λ requires a single argument of the form X => ... or (X, Y) => ...",
+              Span(t.span.start, in.lastOffset)
+            )
+            AppliedTypeTree(applied, args)
+          }
+
           applied match {
             case Ident(tpnme.raw.LAMBDA) =>
               args match {
@@ -1591,31 +1596,18 @@ object Parsers {
                   val typeDefs = params.collect {
                     case Ident(name) => TypeDef(name.toTypeName, TypeBoundsTree(EmptyTree, EmptyTree))
                   }
-                  if (typeDefs.length != params.length) {
-                    syntaxError("λ requires a single argument of the form X => ... or (X, Y) => ...", in.offset)
-                    AppliedTypeTree(applied, args)
-                  } else {
-                    LambdaTypeTree(typeDefs, body)
-                  }
+                  if (typeDefs.length != params.length) fail()
+                  else LambdaTypeTree(typeDefs, body)
                 case _ =>
-                  syntaxError("λ requires a single argument of the form X => ... or (X, Y) => ...", in.offset)
-                  AppliedTypeTree(applied, args)
+                  fail()
               }
             case _ =>
-              val tparams = new ListBuffer[TypeDef]
-
-              val newArgs = args.map {
-                case Ident(tpnme.raw.STAR) =>
-                  val name = tpnme.syntheticTypeParamName(tparams.length)
-                  tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
-                  Ident(name)
-                case other => other
-              }
+              val (newArgs, tparams) = replaceKindProjectorPlaceholders(args)
 
               if (tparams.isEmpty) {
                 AppliedTypeTree(applied, args)
               } else {
-                LambdaTypeTree(tparams.toList, AppliedTypeTree(applied, newArgs))
+                LambdaTypeTree(tparams, AppliedTypeTree(applied, newArgs))
               }
           }
 
@@ -1627,20 +1619,12 @@ object Parsers {
         if (ctx.settings.YkindProjector.value) {
           t match {
             case Tuple(params) =>
-              val tparams = new ListBuffer[TypeDef]
-
-              val newParams = params.map {
-                case Ident(tpnme.raw.STAR) =>
-                  val name = tpnme.syntheticTypeParamName(tparams.length)
-                  tparams += TypeDef(name, TypeBoundsTree(EmptyTree, EmptyTree))
-                  Ident(name)
-                case other => other
-              }
+              val (newParams, tparams) = replaceKindProjectorPlaceholders(params)
 
               if (tparams.isEmpty) {
                 t
               } else {
-                LambdaTypeTree(tparams.toList, Tuple(newParams))
+                LambdaTypeTree(tparams, Tuple(newParams))
               }
             case _ => t
           }
